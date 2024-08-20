@@ -9,7 +9,12 @@ from dotenv import load_dotenv
 from telebot import TeleBot, types
 import logging
 
-from exceptions import TokenNotAccessible, UnexpectedResponseType, ExpectedResponseKeyNotFound
+from exceptions import (
+    TokenMissing,
+    UnexpectedResponseType,
+    ExpectedResponseKeyNotFound,
+    UnexpectedHomeworkStatus,
+)
 
 
 load_dotenv()
@@ -18,7 +23,7 @@ PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-RETRY_PERIOD = 10
+RETRY_PERIOD = 15
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -49,10 +54,9 @@ def check_tokens():
               }
     for token in tokens:
         if not tokens[token]:
-            token_error_message = f'''Отсутствует обязательная переменная
-            окружения {token} во время запуска бота'''
-            logging.critical(token_error_message) 
-            raise TokenNotAccessible
+            token_error_message = f'Token missing: {token}'
+            logging.critical(token_error_message)
+            raise TokenMissing
 
 def send_message(bot, message):
     '''
@@ -65,10 +69,9 @@ def send_message(bot, message):
     chat_id = TELEGRAM_CHAT_ID
     try:
         bot.send_message(chat_id=chat_id, text=message)
-        logging.debug(f'''Удачная отправка сообщения в Telegram.
-                      Отправлено сообщение: {message}''')
+        logging.debug(f'''Message sent successfully. Message text: {message}''')
     except Exception as error:
-        logging.error(f'Ошибка {error}')
+        logging.error(f'Message not sent: {error}')
 
 
 def get_api_answer(timestamp):
@@ -79,7 +82,7 @@ def get_api_answer(timestamp):
     try:
         homework_statuses = requests.get(url=ENDPOINT, headers=HEADERS, params=timestamp)
     except Exception as error:
-        logging.error(f'Недоступен эндпоинт {ENDPOINT}. Ошибка: {error}')
+        logging.error(f'Endpoint {ENDPOINT} unavailable. Error: {error}')
     homework_statuses_json = homework_statuses.json()
     return homework_statuses_json
 
@@ -93,10 +96,12 @@ def check_response(response):
     if reponse_type != dict:
         logging.error(f'Некорректный ответ API. Ожидался dict, получен {reponse_type}.')
         raise UnexpectedResponseType
+    logging.debug(f'API response checked. response type: {reponse_type} is ok')
     for key in response_expected_keys:
         if key not in response.keys():
             logging.error(f'Некорректный ответ API. В ответе отсутствует ключ {key}.')
             raise ExpectedResponseKeyNotFound
+    logging.debug(f'API response checked. All expected keys ({response_expected_keys}) found')
 
 
 def parse_status(homework):
@@ -107,46 +112,52 @@ def parse_status(homework):
     содержащую один из вердиктов словаря HOMEWORK_VERDICTS
     '''
     homework_name = homework['homework_name']
-    try:
-        verdict = HOMEWORK_VERDICTS[homework['status']]
+    homework_status = homework['status']
+    if homework_status in HOMEWORK_VERDICTS.keys():
+        verdict = HOMEWORK_VERDICTS[homework_status]
         return f'Изменился статус проверки работы "{homework_name}". {verdict}'
-    except Exception as error:
-        logging.error(f'Неожиданный статус домашней работы, обнаруженный в ответе API. Ошибка: {error}')    
+    else:
+        raise UnexpectedHomeworkStatus
 
 
 def main():
     '''
     Основная логика работы бота.
-
     '''
     bot = TeleBot(token=TELEGRAM_TOKEN)
     # timestamp = int(time.time())
     timestamp = 0
+    cycle_counter = 0
     while True:
+        cycle_counter += 1
+        print(f'Starting polling {cycle_counter}...')
         try:
             check_tokens()
-            status = f'Проверяю период от {timestamp} до {int(time.time())}'
-            send_message(bot, status)
             payload = {'from_date': timestamp}
             homeworks = get_api_answer(payload)
-            pprint(homeworks)
             check_response(homeworks)
             homeworks_list = homeworks['homeworks']
             if not homeworks_list:
                 logging.debug(f'Отсутствие в ответе новых статусов.')
                 send_message(bot, 'Обновлений нет')
-            for homework in homeworks:
+            for homework in homeworks_list:
                 status_update = parse_status(homework)
                 send_message(bot, status_update)
             timestamp = int(time.time())
-            time.sleep(RETRY_PERIOD)
-        except UnexpectedResponseType or ExpectedResponseKeyNotFound as error:
-            continue
-        except TokenNotAccessible as error:
-            logging.critical(f'Отсутствует переменная окружения, ошибка {error}')
+        except TokenMissing as error:
+            logging.critical(f'{error}. Bot will stop now.')
             break
-        except Exception as error:
-            message = f'Сбой в работе программы: {error}'
+        except UnexpectedResponseType or ExpectedResponseKeyNotFound:
+            continue
+        except ValueError as error:
+            logging.error(f'{error}. Check token')
+            continue
+        except UnexpectedHomeworkStatus as error:
+            logging.error(f'{error}. Unexpected status! Verdict not found.')
+            continue
+        finally:
+            print('sleeping now...')
+            time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
