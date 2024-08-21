@@ -13,13 +13,22 @@ class ApiUnavailable(Exception):
     def __str__(self):
         return f'API сервиса Практикум.Домашка недоступен. Код ответа: {self.response_code}'
     
-class ExpectedResponseKeyNotFound(Exception):
+class ExpectedKeyNotFoundTwo(Exception):
     
-    def __init__(self, missing_key):
+    def __init__(self, missing_key, item_name):
+        self.missing_key = missing_key
+        self.item_name = item_name
+    
+    def __str__(self):
+        return f'Получен некорректный {self.item_name}. В ответе отсутствует ключ {self.missing_key}.'
+
+class ExpectedKeyNotFound(Exception):
+    
+    def __init__(self, missing_key, item_name):
         self.missing_key = missing_key
     
     def __str__(self):
-        return f'Некорректный ответ API. В ответе отсутствует ключ {self.missing_key}.'
+        return f'Получен некорректный ответ. В ответе отсутствует ключ {self.missing_key}.'
 
 class HomeworkNameNotFound(Exception):
     def __str__(self):

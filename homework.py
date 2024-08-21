@@ -10,11 +10,15 @@ import logging
 from exceptions import (
     TokenMissing,
     UnexpectedResponseType,
-    ExpectedResponseKeyNotFound,
+    ExpectedKeyNotFound,
     UnexpectedHomeworkStatus,
     ApiUnavailable,
     HomeworkNameNotFound,
+    ExpectedKeyNotFoundTwo
 )
+
+
+
 
 
 load_dotenv()
@@ -23,9 +27,9 @@ PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-# RETRY_PERIOD = 15
 RETRY_PERIOD = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
+# ENDPOINT = 'http://www.google.com/404'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
 HOMEWORK_VERDICTS = {
@@ -68,7 +72,7 @@ def send_message(bot, message):
     chat_id = TELEGRAM_CHAT_ID
     try:
         bot.send_message(chat_id=chat_id, text=message)
-        logging.debug(f' Успешно отправлено сообщение: {message}')
+        logging.debug(f'Успешно отправлено сообщение: {message}')
     except Exception as error:
         logging.error(error, exc_info=True)
 
@@ -85,8 +89,31 @@ def get_api_answer(timestamp):
             raise ApiUnavailable(homework_statuses.status_code)
         homework_statuses_json = homework_statuses.json()
         return homework_statuses_json
-    except requests.RequestException:
-        pass
+    except requests.RequestException as error:
+        logging.error(error, exc_info=True)
+
+########
+
+def check_keys(response, example_dict, now_checking):
+    '''Проверяет наличие ключей, а также типы их значений на соответствие документации API сервиса Практикум.Домашка.
+    В качестве параметра функция получает:
+    response - словарь, который необходимо проверить
+    example_dict - словарь, с которым необходимо сравнить
+    now_checking - что проверяем'''
+    reponse_type = type(response)
+    expected_type = type(example_dict)
+    if not isinstance(response, expected_type):
+        raise TypeError(f'Некорректный тип {now_checking}. Ожидался {expected_type.__name__}, получен {reponse_type.__name__}.')
+    logging.info(f'Тип {now_checking} проверен: полученный тип {reponse_type} соответствует ожидаемому.')
+    for key, value in example_dict.items():
+        if key not in response.keys():
+            raise ExpectedKeyNotFoundTwo(key, now_checking)
+        if not isinstance(response[key], value):
+            raise TypeError(f'Некорректный {now_checking}. Ожидался тип значения {key} равный {value}, получен {type(response[key])}')
+    logging.info(f'{now_checking} проверен. Все ожидаемые ключи {now_checking.keys()} на месте.')
+
+
+#####
 
 
 def check_response(response):
@@ -96,17 +123,23 @@ def check_response(response):
     
     reponse_type = type(response)
     expected_type = dict
-    response_keys_and_types = {'homeworks': list, 
-                               'current_date': int, }
+    response_keys_and_types = {'homeworks': list,
+                               'current_date': int,
+                               }
+    
+
+    
     if not isinstance(response, expected_type):
-        raise TypeError(f'Некорректный ответ API. Ожидался {expected_type.__name__}, получен {reponse_type.__name__}.')
-    logging.debug(f'Ответ API проверен. Тип ответа: {reponse_type} соответствует ожидаемому.')
+        raise TypeError(f'Некорректный тип ответа API. Ожидался {expected_type.__name__}, получен {reponse_type.__name__}.')
+    logging.info(f'Тип ответа API проверен: полученный тип {reponse_type} соответствует ожидаемому.')
     for key, value in response_keys_and_types.items():
         if key not in response.keys():
-            raise ExpectedResponseKeyNotFound(key)
+            raise ExpectedKeyNotFound(key)
         if not isinstance(response[key], value):
             raise TypeError(f'Некорректный ответ API. Ожидался тип значения {key} равный {value}, получен {type(response[key])}')
-    logging.debug(f'API response checked. All expected keys found')
+    
+    
+    logging.info(f'Ответ API проверен. Все ожидаемые ключи {response_keys_and_types.keys()} на месте.')
 
 def parse_status(homework):
     '''
@@ -115,8 +148,20 @@ def parse_status(homework):
     В случае успеха функция возвращает подготовленную для отправки в Telegram строку,
     содержащую один из вердиктов словаря HOMEWORK_VERDICTS
     '''
+    homework_keys_and_types = {'homework_name': str, 'status': str}
+
+
+    
     if 'homework_name' not in homework.keys():
         raise HomeworkNameNotFound
+    homework_keys_and_types = {'homework_name': str, 'status': str}
+    for key, value in homework_keys_and_types.items():
+        if key not in homework.keys():
+            raise ExpectedKeyNotFound(key)
+        if not isinstance(homework[key], value):
+            raise TypeError(f'Некорректный ответ API. Ожидался тип значения {key} равный {value}, получен {type(homework[key])}')
+    
+    
     homework_name = homework['homework_name']
     homework_status = homework['status']
     if homework_status in HOMEWORK_VERDICTS.keys():
@@ -131,11 +176,11 @@ def main():
     Основная логика работы бота.
     '''
     bot = TeleBot(token=TELEGRAM_TOKEN)
-    # timestamp = int(time.time())
+    timestamp = int(time.time())
     timestamp = 0
-    cycle_counter = 0
     while True:
         try:
+            send_message(bot, f'Проверяю период от {timestamp} до {int(time.time())}')
             check_tokens()
             payload = {'from_date': timestamp}
             homeworks = get_api_answer(payload)
@@ -145,20 +190,27 @@ def main():
                 logging.debug(f'В ответе отсутствуют обновления статусов домашки (пустой ответ).')
                 send_message(bot, 'Обновлений пока нет')
             for homework in homeworks_list:
-                status_update = parse_status(homework)
-                send_message(bot, status_update)
+                try:
+                    status_update = parse_status(homework)
+                    send_message(bot, status_update)
+                except UnexpectedHomeworkStatus as error:
+                    send_message(bot, f'Возникла ошибка! {error}')
+                    logging.error(error, exc_info=True)
+                    continue
             timestamp = int(time.time())
             time.sleep(RETRY_PERIOD)
         except TokenMissing as error:
             logging.critical(error, exc_info=True)
             break
         except (UnexpectedResponseType,
-                ExpectedResponseKeyNotFound,
-                UnexpectedHomeworkStatus,
-                ValueError) as error:
+                ExpectedKeyNotFound,
+                TypeError,
+                ApiUnavailable) as error:
             send_message(bot, f'Возникла ошибка! {error}')
             logging.error(error, exc_info=True)
+            time.sleep(RETRY_PERIOD)
             continue
+            
 
             
 
