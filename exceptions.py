@@ -3,7 +3,7 @@ class TokenMissing(Exception):
         self.missing_token = missing_token
 
     def __str__(self):
-        return f'Проблема с переменными окружения (токенами). Обязательная переменная {self.missing_token} не обнаружена!'
+        return f'Проблема с переменными окружения (токенами). Обязательная переменная {self.missing_token} не обнаружена! Бот завершает работу'
 
 class ApiUnavailable(Exception):
 
@@ -26,13 +26,14 @@ class HomeworkNameNotFound(Exception):
         return 'Отсутствует ключ Homework name!'
     
 
-
-
 class UnexpectedResponseType(Exception):
     def __str__(self):
         return 'Некорректный ответ сервиса!'
 
 class UnexpectedHomeworkStatus(Exception):
+    
+    def __init__(self, verdict):
+        self.verdict = verdict
     def __str__(self):
-        return 'Некорректный вердикт!'
+        return f'Некорректный вердикт! Получен вердикт {self.verdict}'
 

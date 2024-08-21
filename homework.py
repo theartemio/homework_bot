@@ -70,7 +70,7 @@ def send_message(bot, message):
         bot.send_message(chat_id=chat_id, text=message)
         logging.debug(f' Успешно отправлено сообщение: {message}')
     except Exception as error:
-        logging.error(f'Сообщение {message} не отправлено. Ошибка: {error}')
+        logging.error(error, exc_info=True)
 
 
 def get_api_answer(timestamp):
@@ -89,8 +89,6 @@ def get_api_answer(timestamp):
         pass
 
 
-
-
 def check_response(response):
     '''Проверяет ответ на соответствие документации API сервиса Практикум.Домашка.
     В качестве параметра функция получает:
@@ -99,7 +97,7 @@ def check_response(response):
     reponse_type = type(response)
     expected_type = dict
     response_keys_and_types = {'homeworks': list, 
-                               'current_date': int,}
+                               'current_date': int, }
     if not isinstance(response, expected_type):
         raise TypeError(f'Некорректный ответ API. Ожидался {expected_type.__name__}, получен {reponse_type.__name__}.')
     logging.debug(f'Ответ API проверен. Тип ответа: {reponse_type} соответствует ожидаемому.')
@@ -109,11 +107,6 @@ def check_response(response):
         if not isinstance(response[key], value):
             raise TypeError(f'Некорректный ответ API. Ожидался тип значения {key} равный {value}, получен {type(response[key])}')
     logging.debug(f'API response checked. All expected keys found')
-
-
-
-
-
 
 def parse_status(homework):
     '''
@@ -130,7 +123,7 @@ def parse_status(homework):
         verdict = HOMEWORK_VERDICTS[homework_status]
         return f'Изменился статус проверки работы "{homework_name}". {verdict}'
     else:
-        raise UnexpectedHomeworkStatus
+        raise UnexpectedHomeworkStatus(homework_status)
 
 
 def main():
@@ -142,8 +135,6 @@ def main():
     timestamp = 0
     cycle_counter = 0
     while True:
-        cycle_counter += 1
-        print(f'Starting polling {cycle_counter}...')
         try:
             check_tokens()
             payload = {'from_date': timestamp}
@@ -151,24 +142,24 @@ def main():
             check_response(homeworks)
             homeworks_list = homeworks['homeworks']
             if not homeworks_list:
-                logging.debug(f'Отсутствие в ответе новых статусов.')
-                send_message(bot, 'Обновлений нет')
+                logging.debug(f'В ответе отсутствуют обновления статусов домашки (пустой ответ).')
+                send_message(bot, 'Обновлений пока нет')
             for homework in homeworks_list:
                 status_update = parse_status(homework)
                 send_message(bot, status_update)
             timestamp = int(time.time())
             time.sleep(RETRY_PERIOD)
         except TokenMissing as error:
-            logging.critical(f'{error}. Bot will stop now.')
+            logging.critical(error, exc_info=True)
             break
-        except UnexpectedResponseType or ExpectedResponseKeyNotFound:
+        except (UnexpectedResponseType,
+                ExpectedResponseKeyNotFound,
+                UnexpectedHomeworkStatus,
+                ValueError) as error:
+            send_message(bot, f'Возникла ошибка! {error}')
+            logging.error(error, exc_info=True)
             continue
-        except ValueError as error:
-            logging.error(f'{error}. Check token')
-            continue
-        except UnexpectedHomeworkStatus as error:
-            logging.error(f'{error}. Unexpected status! Verdict not found.')
-            continue
+
             
 
 
