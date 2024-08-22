@@ -28,7 +28,7 @@ HOMEWORK_VERDICTS = {
 }
 
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s, %(name)s, %(levelname)s, %(message)s',
     level=logging.DEBUG,
     filename='homework_bot.log',
     filemode='a'
@@ -163,6 +163,8 @@ def main():
     """Основная логика работы бота."""
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
+    logger.info(f'Бот начал работу. Первая временная метка: {timestamp}.')
+    send_message(bot, 'Бот начал работу!')
     while True:
         try:
             tokens = {'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
