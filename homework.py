@@ -5,12 +5,11 @@ import sys
 import time
 
 import requests
-from datetime import datetime
 from dotenv import load_dotenv
 from telebot import TeleBot
 
-from exceptions import (ApiError, ExpectedKeyNotFound, TokenMissing,
-                        UnexpectedHomeworkStatus, UnexpectedResponseType)
+from exceptions import (ApiError, ExpectedKeyNotFound,
+                        TokenMissing, UnexpectedHomeworkStatus)
 
 load_dotenv()
 
@@ -28,30 +27,23 @@ HOMEWORK_VERDICTS = {
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
 }
 
-
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.DEBUG,
     filename='homework_bot.log',
     filemode='a'
 )
-
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler(stream=sys.stdout)
 logger.addHandler(handler)
 
-def check_tokens():
+
+def check_tokens(tokens):
     """
     Функция проверяет существование обязательных переменных окружения.
-    Проверяемые переменные:
-    PRACTICUM_TOKEN
-    TELEGRAM_TOKEN
-    TELEGRAM_CHAT_ID
+    В качестве параметров функция принимает:
+    tokens - словарь названий токенов и их значений
     """
-    tokens = {'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
-              'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
-              'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
-              }
     for token in tokens:
         if not tokens[token]:
             raise TokenMissing(token)
@@ -88,18 +80,19 @@ def get_api_answer(timestamp):
         if homework_statuses.status_code != 200:
             raise ApiError(homework_statuses.status_code)
         homework_statuses_json = homework_statuses.json()
+        logger.debug('Ответ API получен')
         return homework_statuses_json
     except requests.RequestException as error:
         logger.error(error, exc_info=True)
 
 
-def check_type_and_keys(response, example_element, element_name):
+def check_type_and_keys(response, example, element_name):
     """
     Проверяет наличие ключей и типы их значений.
     Ключи должны соответствовать документации API сервиса Практикум.Домашка.
     В качестве параметров функция принимает:
     response - Элемент, который необходимо проверить
-    example_element - Пример данных, с которыми необходимо сравнить response
+    example - Пример данных, с которыми необходимо сравнить response
     element_name - Название проверяемого элемента для сообщений об ошибках
     и логов
     """
@@ -109,18 +102,18 @@ def check_type_and_keys(response, example_element, element_name):
         raise TypeError(f'''Некорректный {element_name}.
                         Ожидался {expected_type.__name__},
                         получен {reponse_type.__name__}.''')
-    logger.info(f'''Тип {element_name} проверен:
+    logger.debug(f'''Тип {element_name} проверен:
                  полученный тип {reponse_type}
                  соответствует ожидаемому.''')
-    for key, value in example_element.items():
+    for key, value in example.items():
         if key not in response.keys():
             raise ExpectedKeyNotFound(key, element_name)
         if not isinstance(response[key], value):
             raise TypeError(f'''Некорректный {element_name}.
                             Ожидался тип значения {key} равный {value},
                             получен {type(response[key])}''')
-    logger.info(f'''{element_name} проверен.
-                 Все ожидаемые ключи {example_element.keys()}
+    logger.debug(f'''{element_name} проверен.
+                 Все ожидаемые ключи {example.keys()}
                  на месте.''')
 
 
@@ -135,7 +128,7 @@ def check_response(response):
                                }
     checking = 'Ответ API'
     check_type_and_keys(response, response_keys_and_types, checking)
-    logger.info(f'''Ответ API проверен.
+    logger.debug(f'''Ответ API проверен.
                  Все ожидаемые ключи {response_keys_and_types.keys()}
                  на месте.''')
 
@@ -161,6 +154,8 @@ def parse_status(homework):
     if homework_status not in HOMEWORK_VERDICTS.keys():
         raise UnexpectedHomeworkStatus(homework_status)
     verdict = HOMEWORK_VERDICTS[homework_status]
+    logger.debug(f'''Получен статус {homework_status} для работы
+                 {homework_name}''')
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
@@ -168,23 +163,23 @@ def main():
     """Основная логика работы бота."""
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
-    timestamp = 0
     while True:
         try:
-            send_message(bot, f'''Проверяю период
-                         от {timestamp} до {int(time.time())}''')
-            
-            check_tokens()
+            tokens = {'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
+                      'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
+                      'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
+                      }
+            check_tokens(tokens)
             payload = {'from_date': timestamp}
             homeworks = get_api_answer(payload)
             check_response(homeworks)
             homeworks_list = homeworks['homeworks']
             if not homeworks_list:
-                logger.debug('''В ответе отсутствуют обновления статусов
+                logger.debug(f'''Проверен период от {timestamp}
+                             до {int(time.time())}.
+                             В ответе отсутствуют обновления статусов
                               домашки (список работ под ключом
                               "homeworks" пуст).''')
-                send_message(bot, '''Проверен период от  
-                             Обновлений пока нет''')
             for homework in homeworks_list:
                 try:
                     status_update = parse_status(homework)
@@ -199,12 +194,11 @@ def main():
             logger.critical(error, exc_info=True)
             send_message(bot, f'Возникла ошибка! {error}')
             break
-        except (UnexpectedResponseType,
-                ExpectedKeyNotFound,
+        except (ExpectedKeyNotFound,
                 TypeError,
                 ApiError) as error:
-            send_message(bot, f'Возникла ошибка! {error}')
             logger.error(error, exc_info=True)
+            send_message(bot, f'Возникла ошибка! {error}')
             time.sleep(RETRY_PERIOD)
             continue
 

@@ -1,4 +1,6 @@
 class TokenMissing(Exception):
+    """Проблема с переменными окружения."""
+
     def __init__(self, missing_token):
         self.missing_token = missing_token
 
@@ -9,15 +11,19 @@ class TokenMissing(Exception):
 
 
 class ApiError(Exception):
+    """Ошибка API сервиса Практикум.Домашка, либо ошибка в URL эндпоинта."""
+
     def __init__(self, response_code):
         self.response_code = response_code
 
     def __str__(self):
-        return f'''Ошибка API сервиса Практикум.Домашка.
-        Код ответа: {self.response_code}'''
+        return f'''Ошибка доступа к API сервиса.
+        Проверьте код ответа эндпоинта. Код ответа: {self.response_code}'''
 
 
-class ExpectedKeyNotFound(Exception):    
+class ExpectedKeyNotFound(Exception):
+    """В ответе отсутствует один из обязательных ключей."""
+
     def __init__(self, missing_key, item_name):
         self.missing_key = missing_key
         self.item_name = item_name
@@ -27,17 +33,9 @@ class ExpectedKeyNotFound(Exception):
         В ответе отсутствует ключ {self.missing_key}.'''
 
 
-class HomeworkNameNotFound(Exception):
-    def __str__(self):
-        return 'Отсутствует ключ Homework name!'
+class UnexpectedHomeworkStatus(Exception):
+    """Статус работы не найден в словаре."""
 
-
-class UnexpectedResponseType(Exception):
-    def __str__(self):
-        return 'Некорректный ответ сервиса!'
-
-
-class UnexpectedHomeworkStatus(Exception):    
     def __init__(self, verdict):
         self.verdict = verdict
     def __str__(self):
