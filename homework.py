@@ -1,14 +1,14 @@
-
 import logging
 import os
 import sys
 import time
+from http import HTTPStatus, client
 
 import requests
 from dotenv import load_dotenv
-from telebot import TeleBot
+from telebot import TeleBot, apihelper
 
-from exceptions import (ApiError, ExpectedKeyNotFound,
+from exceptions import (ApiError, ExpectedKeyNotFound, RequestError,
                         TokenMissing, UnexpectedHomeworkStatus)
 
 load_dotenv()
@@ -27,25 +27,22 @@ HOMEWORK_VERDICTS = {
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
 }
 
-logging.basicConfig(
-    format='%(asctime)s, %(name)s, %(levelname)s, %(message)s',
-    level=logging.DEBUG,
-    filename='homework_bot.log',
-    filemode='a'
-)
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler(stream=sys.stdout)
 logger.addHandler(handler)
 
 
-def check_tokens(tokens):
-    """
-    Функция проверяет существование обязательных переменных окружения.
-    В качестве параметров функция принимает:
-    tokens - словарь названий токенов и их значений
-    """
+def check_tokens():
+    """Функция проверяет существование обязательных переменных окружения."""
+    tokens = {'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
+              'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
+              'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
+              }
     for token in tokens:
         if not tokens[token]:
+            logger.critical(f'''Проблема с переменными окружения (токенами).
+                            Обязательная переменная {token} не обнаружена!
+                            Бот завершает работу''')
             raise TokenMissing(token)
 
 
@@ -59,10 +56,13 @@ def send_message(bot, message):
     """
     chat_id = TELEGRAM_CHAT_ID
     try:
+        logger.debug(f'Бот начинает отправку сообщения: {message}')
         bot.send_message(chat_id=chat_id, text=message)
         logger.debug(f'Успешно отправлено сообщение: {message}')
-    except Exception as error:
+        return True
+    except apihelper.ApiException or requests.RequestException as error:
         logger.error(error, exc_info=True)
+        return False
 
 
 def get_api_answer(timestamp):
@@ -73,17 +73,30 @@ def get_api_answer(timestamp):
     В качестве параметров функция принимает:
     timestamp - временную метку в формате Unix-времени
     """
+    payload = {'from_date': timestamp}
+    request_data = {
+        'url': ENDPOINT,
+        'headers': HEADERS,
+        'params': payload
+    }
+    logger.debug(f'''Получаем ответ API.
+                    Информация о запросе:
+                    Адрес эндпоинта: {request_data['url']},
+                    Headers: {request_data['headers']},
+                    Параметры: {request_data['params']}''')
     try:
-        homework_statuses = requests.get(url=ENDPOINT,
-                                         headers=HEADERS,
-                                         params=timestamp)
-        if homework_statuses.status_code != 200:
-            raise ApiError(homework_statuses.status_code)
+        homework_statuses = requests.get(url=request_data['url'],
+                                         headers=request_data['headers'],
+                                         params=request_data['params'])
+        response_code = homework_statuses.status_code
+        if response_code != HTTPStatus.OK:
+            raise ApiError(response_code, client.responses[response_code])
         homework_statuses_json = homework_statuses.json()
         logger.debug('Ответ API получен')
         return homework_statuses_json
     except requests.RequestException as error:
         logger.error(error, exc_info=True)
+        raise RequestError(error)
 
 
 def check_type_and_keys(response, example, element_name):
@@ -96,15 +109,14 @@ def check_type_and_keys(response, example, element_name):
     element_name - Название проверяемого элемента для сообщений об ошибках
     и логов
     """
-    reponse_type = type(response)
     expected_type = dict
     if not isinstance(response, expected_type):
+        reponse_type = type(response)
         raise TypeError(f'''Некорректный {element_name}.
                         Ожидался {expected_type.__name__},
                         получен {reponse_type.__name__}.''')
     logger.debug(f'''Тип {element_name} проверен:
-                 полученный тип {reponse_type}
-                 соответствует ожидаемому.''')
+                 полученный тип соответствует ожидаемому.''')
     for key, value in example.items():
         if key not in response.keys():
             raise ExpectedKeyNotFound(key, element_name)
@@ -120,6 +132,8 @@ def check_type_and_keys(response, example, element_name):
 def check_response(response):
     """
     Проверяет ответ API на соответствие документации.
+    Если проверка прошла успешно, функция
+    возвращает список с домашками.
     В качестве параметра функция получает:
     response - ответ API, приведённый к типам данных Python.
     """
@@ -128,9 +142,11 @@ def check_response(response):
                                }
     checking = 'Ответ API'
     check_type_and_keys(response, response_keys_and_types, checking)
+    homework_list = response['homeworks']
     logger.debug(f'''Ответ API проверен.
                  Все ожидаемые ключи {response_keys_and_types.keys()}
                  на месте.''')
+    return homework_list
 
 
 def parse_status(homework):
@@ -165,17 +181,12 @@ def main():
     timestamp = int(time.time())
     logger.info(f'Бот начал работу. Первая временная метка: {timestamp}.')
     send_message(bot, 'Бот начал работу!')
+    last_message = None
+    check_tokens()
     while True:
         try:
-            tokens = {'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
-                      'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
-                      'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
-                      }
-            check_tokens(tokens)
-            payload = {'from_date': timestamp}
-            homeworks = get_api_answer(payload)
-            check_response(homeworks)
-            homeworks_list = homeworks['homeworks']
+            homeworks = get_api_answer(timestamp)
+            homeworks_list = check_response(homeworks)
             if not homeworks_list:
                 logger.debug(f'''Проверен период от {timestamp}
                              до {int(time.time())}.
@@ -185,25 +196,32 @@ def main():
             for homework in homeworks_list:
                 try:
                     status_update = parse_status(homework)
-                    send_message(bot, status_update)
+                    message_sent = send_message(bot, status_update)
+                    if message_sent:
+                        timestamp = homeworks['current_date']
                 except UnexpectedHomeworkStatus as error:
                     send_message(bot, f'Возникла ошибка! {error}')
                     logger.error(error, exc_info=True)
                     continue
-            timestamp = int(time.time())
-            time.sleep(RETRY_PERIOD)
-        except TokenMissing as error:
-            logger.critical(error, exc_info=True)
-            send_message(bot, f'Возникла ошибка! {error}')
-            break
         except (ExpectedKeyNotFound,
                 TypeError,
                 ApiError) as error:
             logger.error(error, exc_info=True)
-            send_message(bot, f'Возникла ошибка! {error}')
+            error_message = f'Возникла ошибка! {error}'
+            if last_message != error_message:
+                send_message(bot, error_message)
+        finally:
             time.sleep(RETRY_PERIOD)
-            continue
 
 
 if __name__ == '__main__':
-    main()
+    logging.basicConfig(
+        format='%(asctime)s, %(name)s, %(levelname)s, %(message)s',
+        level=logging.DEBUG,
+        filename='homework_bot.log',
+        filemode='a'
+    )
+    try:
+        main()
+    except TokenMissing as error:
+        sys.exit(f'Отсутствует обязательная переменная окружения. {error}.')

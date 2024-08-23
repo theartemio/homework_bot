@@ -13,12 +13,13 @@ class TokenMissing(Exception):
 class ApiError(Exception):
     """Ошибка API сервиса Практикум.Домашка, либо ошибка в URL эндпоинта."""
 
-    def __init__(self, response_code):
+    def __init__(self, response_code, response_name):
         self.response_code = response_code
+        self.response_name = response_name
 
     def __str__(self):
         return f'''Ошибка доступа к API сервиса.
-        Проверьте код ответа эндпоинта. Код ответа: {self.response_code}'''
+        Код ответа: {self.response_code}, описаниа: {self.response_name}'''
 
 
 class ExpectedKeyNotFound(Exception):
@@ -38,5 +39,16 @@ class UnexpectedHomeworkStatus(Exception):
 
     def __init__(self, verdict):
         self.verdict = verdict
+
     def __str__(self):
         return f'Некорректный вердикт! Получен вердикт {self.verdict}'
+    
+class RequestError(Exception):
+    """Ошибка запроса."""
+
+    def __init__(self, error):
+        self.error = error
+
+    def __str__(self):
+        return f'При запросе возникла ошибка {self.error}'
+
