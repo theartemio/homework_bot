@@ -193,16 +193,15 @@ def main():
                              В ответе отсутствуют обновления статусов
                               домашки (список работ под ключом
                               "homeworks" пуст).''')
-            for homework in homeworks_list:
-                try:
-                    status_update = parse_status(homework)
-                    message_sent = send_message(bot, status_update)
-                    if message_sent:
-                        timestamp = homeworks['current_date']
-                except UnexpectedHomeworkStatus as error:
-                    send_message(bot, f'Возникла ошибка! {error}')
-                    logger.error(error, exc_info=True)
-                    continue
+            try:
+                status_update = parse_status(homeworks_list[0])
+                message_sent = send_message(bot, status_update)
+                if message_sent:
+                    timestamp = homeworks['current_date']
+            except UnexpectedHomeworkStatus as error:
+                send_message(bot, f'Возникла ошибка! {error}')
+                logger.error(error, exc_info=True)
+                continue
         except (ExpectedKeyNotFound,
                 TypeError,
                 ApiError) as error:
