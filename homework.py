@@ -89,14 +89,14 @@ def get_api_answer(timestamp):
                                          headers=request_data['headers'],
                                          params=request_data['params'])
         response_code = homework_statuses.status_code
-        if response_code != HTTPStatus.OK:
-            raise ApiError(response_code, client.responses[response_code])
         homework_statuses_json = homework_statuses.json()
-        logger.debug('Ответ API получен')
-        return homework_statuses_json
     except requests.RequestException as error:
         logger.error(error, exc_info=True)
         raise RequestError(error)
+    if response_code != HTTPStatus.OK:
+        raise ApiError(response_code, client.responses[response_code])
+    logger.debug('Ответ API получен')
+    return homework_statuses_json
 
 
 def check_type_and_keys(response, example, element_name):
