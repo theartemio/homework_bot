@@ -17,7 +17,7 @@ PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-RETRY_PERIOD = 600
+RETRY_PERIOD = 1800
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -38,12 +38,17 @@ def check_tokens():
               'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
               'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
               }
-    for token in tokens:
-        if not tokens[token]:
-            logger.critical(f'''Проблема с переменными окружения (токенами).
-                            Обязательная переменная {token} не обнаружена!
+    missing_tokens = []
+    for token_name, token_value in tokens.items():
+        if not token_value:
+            missing_tokens += token_name
+    if missing_tokens:
+        missing_tokens_names = ', '.join(missing_tokens)
+        logger.critical(f'''Проблема с переменными окружения (токенами).
+                            Не обнаружены обязательные переменные:
+                            {missing_tokens_names}!
                             Бот завершает работу''')
-            raise TokenMissing(token)
+        raise TokenMissing(missing_tokens_names)
 
 
 def send_message(bot, message):
@@ -79,15 +84,14 @@ def get_api_answer(timestamp):
         'headers': HEADERS,
         'params': payload
     }
-    logger.debug(f'''Получаем ответ API.
+    logger_template = '''Получаем ответ API.
                     Информация о запросе:
-                    Адрес эндпоинта: {request_data['url']},
-                    Headers: {request_data['headers']},
-                    Параметры: {request_data['params']}''')
+                    Адрес эндпоинта: {url},
+                    Headers: {headers},
+                    Параметры: {params}'''
+    logger.debug(logger_template.format(**request_data))
     try:
-        homework_statuses = requests.get(url=request_data['url'],
-                                         headers=request_data['headers'],
-                                         params=request_data['params'])
+        homework_statuses = requests.get(**request_data)
         response_code = homework_statuses.status_code
         homework_statuses_json = homework_statuses.json()
     except requests.RequestException as error:
@@ -99,7 +103,7 @@ def get_api_answer(timestamp):
     return homework_statuses_json
 
 
-def check_type_and_keys(response, example, element_name):
+def check_type_and_keys(response, example, element_name, return_key=None):
     """
     Проверяет наличие ключей и типы их значений.
     Ключи должны соответствовать документации API сервиса Практикум.Домашка.
@@ -110,6 +114,7 @@ def check_type_and_keys(response, example, element_name):
     и логов
     """
     expected_type = dict
+    return_item = None
     if not isinstance(response, expected_type):
         reponse_type = type(response)
         raise TypeError(f'''Некорректный {element_name}.
@@ -120,6 +125,8 @@ def check_type_and_keys(response, example, element_name):
     for key, value in example.items():
         if key not in response.keys():
             raise ExpectedKeyNotFound(key, element_name)
+        elif key == return_key:
+            return_item = response[key]
         if not isinstance(response[key], value):
             raise TypeError(f'''Некорректный {element_name}.
                             Ожидался тип значения {key} равный {value},
@@ -127,6 +134,8 @@ def check_type_and_keys(response, example, element_name):
     logger.debug(f'''{element_name} проверен.
                  Все ожидаемые ключи {example.keys()}
                  на месте.''')
+    if return_item:
+        return return_item
 
 
 def check_response(response):
@@ -141,8 +150,10 @@ def check_response(response):
                                'current_date': int,
                                }
     checking = 'Ответ API'
-    check_type_and_keys(response, response_keys_and_types, checking)
-    homework_list = response['homeworks']
+    homework_list = check_type_and_keys(response,
+                                        response_keys_and_types,
+                                        checking,
+                                        'homeworks')
     logger.debug(f'''Ответ API проверен.
                  Все ожидаемые ключи {response_keys_and_types.keys()}
                  на месте.''')
@@ -177,12 +188,12 @@ def parse_status(homework):
 
 def main():
     """Основная логика работы бота."""
+    check_tokens()
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
     logger.info(f'Бот начал работу. Первая временная метка: {timestamp}.')
     send_message(bot, 'Бот начал работу!')
     last_message = None
-    check_tokens()
     while True:
         try:
             homeworks = get_api_answer(timestamp)
@@ -193,22 +204,18 @@ def main():
                              В ответе отсутствуют обновления статусов
                               домашки (список работ под ключом
                               "homeworks" пуст).''')
-            try:
+            else:
                 status_update = parse_status(homeworks_list[0])
                 message_sent = send_message(bot, status_update)
                 if message_sent:
                     timestamp = homeworks['current_date']
-            except UnexpectedHomeworkStatus as error:
-                send_message(bot, f'Возникла ошибка! {error}')
-                logger.error(error, exc_info=True)
-                continue
-        except (ExpectedKeyNotFound,
-                TypeError,
-                ApiError) as error:
+                    last_message = None
+        except Exception as error:
             logger.error(error, exc_info=True)
             error_message = f'Возникла ошибка! {error}'
             if last_message != error_message:
                 send_message(bot, error_message)
+                last_message = error_message
         finally:
             time.sleep(RETRY_PERIOD)
 

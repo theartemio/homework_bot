@@ -1,12 +1,12 @@
 class TokenMissing(Exception):
     """Проблема с переменными окружения."""
 
-    def __init__(self, missing_token):
-        self.missing_token = missing_token
+    def __init__(self, missing_tokens_names):
+        self.missing_tokens_names = missing_tokens_names
 
     def __str__(self):
         return f'''Проблема с переменными окружения (токенами).
-        Обязательная переменная {self.missing_token} не обнаружена!
+        Обязательная переменная {self.missing_tokens_names} не обнаружена!
         Бот завершает работу'''
 
 
